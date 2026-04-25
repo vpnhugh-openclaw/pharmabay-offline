@@ -21,6 +21,7 @@ import ReconciliationReport from "./pages/ReconciliationReport";
 import ChannelListingImports from "./pages/ChannelListingImports";
 import EbayCallback from "./pages/EbayCallback";
 import MarketResearch from "./pages/MarketResearch";
+import { ShopifyListings } from "./pages/ShopifyListings";
 import Auth from "./pages/Auth";
 import Exports from "./pages/Exports";
 import ScrapeProducts from "./pages/ScrapeProducts";
@@ -57,6 +58,7 @@ const App = () => (
               <Route path="/audit" element={<AuditLog />} />
               <Route path="/market-research" element={<MarketResearch />} />
               <Route path="/scrape" element={<ScrapeProducts />} />
+              <Route path="/shopify-listings" element={<ShopifyListings />} />
             </Route>
           </Route>
           <Route path="*" element={<NotFound />} />

@@ -220,6 +220,15 @@ export function initDB() {
       failed INTEGER DEFAULT 0
     );
 
+    CREATE TABLE IF NOT EXISTS shopify_listings (
+      id TEXT PRIMARY KEY,
+      shopify_id INTEGER UNIQUE,
+      data_json TEXT,
+      edited_json TEXT,
+      has_edits INTEGER DEFAULT 0,
+      cached_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS stock_sync_items (
       id TEXT PRIMARY KEY,
       sync_run_id TEXT,

@@ -13,6 +13,7 @@ import {
   FileDown,
   Sparkles,
   Globe,
+  LayoutList,
 } from "lucide-react";
 import { NavLink } from "@/components/NavLink";
 import { useLocation } from "react-router-dom";
@@ -43,6 +44,7 @@ const navItems = [
   { title: "Reconciliation", url: "/reconciliation", icon: ArrowLeftRight },
   { title: "Recon Report", url: "/recon-report", icon: FileText },
   { title: "Stock Sync", url: "/stock-sync", icon: ArrowUpDown },
+  { title: "Shopify Listings", url: "/shopify-listings", icon: LayoutList },
   { title: "Channel Imports", url: "/channel-imports", icon: FileDown },
   { title: "Market Research", url: "/market-research", icon: Sparkles },
   { title: "Scrape Products", url: "/scrape", icon: Globe },

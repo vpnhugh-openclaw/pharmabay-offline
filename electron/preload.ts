@@ -16,4 +16,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   shopifyRefreshProducts: () => ipcRenderer.invoke('shopify-refresh-products'),
   shopifySyncPreview: () => ipcRenderer.invoke('shopify-sync-preview'),
   shopifySyncExecute: (body: any) => ipcRenderer.invoke('shopify-sync-execute', body),
+
+  // Shopify Listings (full product editor)
+  shopifyLoadListings: () => ipcRenderer.invoke('shopify-load-listings'),
+  shopifyGetListings: (opts: any) => ipcRenderer.invoke('shopify-get-listings', opts),
+  shopifySaveListing: (opts: any) => ipcRenderer.invoke('shopify-save-listing', opts),
+  shopifyDiscardListingEdits: (opts: any) => ipcRenderer.invoke('shopify-discard-listing-edits', opts),
+  shopifyPushListingEdits: () => ipcRenderer.invoke('shopify-push-listing-edits'),
+  shopifyExportListingsCsv: (opts: any) => ipcRenderer.invoke('shopify-export-listings-csv', opts),
+  shopifyBulkUpdateListings: (opts: any) => ipcRenderer.invoke('shopify-bulk-update-listings', opts),
+  shopifySaveDialog: (opts: any) => ipcRenderer.invoke('shopify-save-dialog', opts),
 });

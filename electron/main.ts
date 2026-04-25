@@ -369,6 +369,306 @@ ipcMain.handle('shopify-sync-execute', async (event, body: any) => {
   }
 });
 
+// ─── Shopify Listings (full product editor) ──────────────────────────────────
+
+ipcMain.handle('shopify-load-listings', async () => {
+  try {
+    const client = new ShopifyAdminClient();
+    const products = await client.fetchAllProducts();
+    const now = new Date().toISOString();
+
+    const upsert = db.prepare(`
+      INSERT INTO shopify_listings (id, shopify_id, data_json, cached_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        shopify_id = excluded.shopify_id,
+        data_json  = excluded.data_json,
+        cached_at  = excluded.cached_at
+    `);
+
+    const upsertAll = db.transaction((prods: any[]) => {
+      for (const p of prods) {
+        upsert.run(String(p.id), p.id, JSON.stringify(p), now);
+      }
+    });
+
+    // Also refresh products cache for StockSync
+    const insertCache = db.prepare(`
+      INSERT OR REPLACE INTO shopify_products_cache
+        (id, shopify_product_id, shopify_variant_id, title, handle, status, vendor,
+         product_type, sku, barcode, price, inventory_item_id, inventory_quantity,
+         variant_title, body_html, tags, cached_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    const cacheAll = db.transaction((prods: any[]) => {
+      db.prepare('DELETE FROM shopify_products_cache').run();
+      for (const product of prods) {
+        for (const variant of (product.variants ?? [])) {
+          insertCache.run(
+            `${product.id}-${variant.id}`,
+            product.id, variant.id, product.title, product.handle, product.status,
+            product.vendor, product.product_type,
+            variant.sku ?? '', variant.barcode ?? '', variant.price ?? '',
+            variant.inventory_item_id, variant.inventory_quantity ?? 0, variant.title,
+            product.body_html ?? '',
+            Array.isArray(product.tags) ? product.tags.join(',') : (product.tags ?? ''),
+            now,
+          );
+        }
+      }
+    });
+
+    upsertAll(products);
+    cacheAll(products);
+
+    return { data: { loaded: products.length, apiCalls: client.apiCallCount }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
+ipcMain.handle('shopify-get-listings', async (event, opts: any) => {
+  try {
+    const search = (opts?.search ?? '').trim().toLowerCase();
+    const status = opts?.status ?? 'all';
+    const vendor = opts?.vendor ?? 'all';
+    const hasEdits = opts?.has_edits ?? false;
+
+    let sql = 'SELECT id, shopify_id, data_json, edited_json, has_edits, cached_at FROM shopify_listings WHERE 1=1';
+    const params: any[] = [];
+
+    if (hasEdits) { sql += ' AND has_edits = 1'; }
+    if (status !== 'all') {
+      sql += ` AND json_extract(data_json, '$.status') = ?`;
+      params.push(status);
+    }
+    if (vendor !== 'all') {
+      sql += ` AND json_extract(data_json, '$.vendor') = ?`;
+      params.push(vendor);
+    }
+    if (search) {
+      sql += ` AND (LOWER(json_extract(data_json, '$.title')) LIKE ?
+                 OR LOWER(json_extract(data_json, '$.vendor')) LIKE ?
+                 OR LOWER(json_extract(data_json, '$.variants[0].barcode')) LIKE ?
+                 OR LOWER(json_extract(data_json, '$.variants[0].sku')) LIKE ?)`;
+      params.push(`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`);
+    }
+
+    sql += ' ORDER BY json_extract(data_json, \'$.title\') ASC';
+
+    const rows = db.prepare(sql).all(...params) as any[];
+
+    // Build local products lookup by barcode and SKU for cost/stock enrichment
+    const localProducts = db.prepare(
+      'SELECT barcode, sku, cost_price, sell_price, stock_on_hand, units_sold_12m, gross_profit_percent FROM products'
+    ).all() as any[];
+    const byBarcode = new Map<string, any>();
+    const bySku = new Map<string, any>();
+    for (const p of localProducts) {
+      if (p.barcode) byBarcode.set(normalizeKey(p.barcode), p);
+      if (p.sku) bySku.set(normalizeKey(p.sku), p);
+    }
+
+    const enriched = rows.map((row: any) => {
+      const data = JSON.parse(row.data_json);
+      const v0 = data.variants?.[0];
+      let local: any = null;
+      if (v0?.barcode) local = byBarcode.get(normalizeKey(v0.barcode));
+      if (!local && v0?.sku) local = bySku.get(normalizeKey(v0.sku));
+      return {
+        ...row,
+        _price: v0?.price ?? null,
+        _barcode: v0?.barcode ?? null,
+        _sku: v0?.sku ?? null,
+        _cost_price: local?.cost_price ?? null,
+        _stock_on_hand: local?.stock_on_hand ?? null,
+        _units_sold_12m: local?.units_sold_12m ?? null,
+        _gross_profit_percent: local?.gross_profit_percent ?? null,
+      };
+    });
+
+    // Distinct vendors for filter dropdown
+    const vendors = db.prepare(
+      "SELECT DISTINCT json_extract(data_json, '$.vendor') as v FROM shopify_listings WHERE v IS NOT NULL ORDER BY v"
+    ).all().map((r: any) => r.v).filter(Boolean);
+
+    return { data: { rows: enriched, vendors, total: enriched.length }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
+ipcMain.handle('shopify-bulk-update-listings', async (event, opts: any) => {
+  try {
+    const { product_ids, patch } = opts as { product_ids: string[]; patch: Record<string, any> };
+    if (!product_ids?.length) return { data: { ok: true, updated: 0 }, error: null };
+    const updateOne = db.transaction((pid: string) => {
+      const row = db.prepare('SELECT data_json, edited_json FROM shopify_listings WHERE id = ?').get(pid) as any;
+      if (!row) return;
+      const base = row.edited_json ? JSON.parse(row.edited_json) : JSON.parse(row.data_json);
+      db.prepare('UPDATE shopify_listings SET edited_json = ?, has_edits = 1 WHERE id = ?').run(
+        JSON.stringify({ ...base, ...patch }), pid
+      );
+    });
+    for (const pid of product_ids) updateOne(String(pid));
+    return { data: { ok: true, updated: product_ids.length }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
+ipcMain.handle('shopify-save-listing', async (event, opts: any) => {
+  try {
+    const { product_id, edited_product } = opts;
+    db.prepare(
+      `UPDATE shopify_listings SET edited_json = ?, has_edits = 1 WHERE id = ?`
+    ).run(JSON.stringify(edited_product), String(product_id));
+    return { data: { ok: true }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
+ipcMain.handle('shopify-discard-listing-edits', async (event, opts: any) => {
+  try {
+    const { product_id } = opts ?? {};
+    if (product_id === '__all__') {
+      db.prepare('UPDATE shopify_listings SET edited_json = NULL, has_edits = 0').run();
+    } else {
+      db.prepare('UPDATE shopify_listings SET edited_json = NULL, has_edits = 0 WHERE id = ?').run(String(product_id));
+    }
+    return { data: { ok: true }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
+ipcMain.handle('shopify-push-listing-edits', async () => {
+  try {
+    const client = new ShopifyAdminClient();
+    const pending = db.prepare(
+      'SELECT id, shopify_id, data_json, edited_json FROM shopify_listings WHERE has_edits = 1'
+    ).all() as any[];
+
+    if (pending.length === 0) return { data: { synced: 0, failed: 0 }, error: null };
+
+    let synced = 0, failed = 0;
+    const errors: string[] = [];
+
+    for (const row of pending) {
+      try {
+        const original = JSON.parse(row.data_json);
+        const edited   = JSON.parse(row.edited_json);
+        const prodId   = row.shopify_id;
+
+        // Product-level fields
+        const productFields = ['title', 'body_html', 'vendor', 'product_type', 'status', 'tags'];
+        const productPatch: any = {};
+        for (const f of productFields) {
+          const ov = typeof original[f] === 'object' ? JSON.stringify(original[f]) : String(original[f] ?? '');
+          const ev = typeof edited[f]   === 'object' ? JSON.stringify(edited[f])   : String(edited[f]   ?? '');
+          if (ov !== ev) productPatch[f] = edited[f];
+        }
+        if (Object.keys(productPatch).length > 0) {
+          await client.updateProduct(prodId, productPatch);
+        }
+
+        // Variant-level fields
+        const variantFields = ['price', 'compare_at_price', 'sku', 'barcode'];
+        for (const ev of (edited.variants ?? [])) {
+          const ov = (original.variants ?? []).find((v: any) => v.id === ev.id);
+          if (!ov) continue;
+          const varPatch: any = {};
+          for (const f of variantFields) {
+            if (String(ov[f] ?? '') !== String(ev[f] ?? '')) varPatch[f] = ev[f];
+          }
+          if (Object.keys(varPatch).length > 0) {
+            await client.updateVariant(ev.id, varPatch);
+          }
+        }
+
+        // Commit: original becomes the edited version
+        db.prepare(
+          `UPDATE shopify_listings SET data_json = ?, edited_json = NULL, has_edits = 0 WHERE id = ?`
+        ).run(row.edited_json, row.id);
+        synced++;
+      } catch (err: any) {
+        failed++;
+        errors.push(`${row.id}: ${err.message}`);
+      }
+    }
+
+    return { data: { synced, failed, errors, apiCalls: client.apiCallCount }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
+ipcMain.handle('shopify-export-listings-csv', async (event, opts: any) => {
+  try {
+    const { file_path, include_edits } = opts;
+    const rows = db.prepare(
+      'SELECT data_json, edited_json, has_edits FROM shopify_listings ORDER BY json_extract(data_json, \'$.title\')'
+    ).all() as any[];
+
+    const header = [
+      'Handle','Title','Body (HTML)','Vendor','Type','Tags','Published','Status',
+      'Variant SKU','Variant Price','Variant Compare At Price','Variant Barcode',
+      'Variant Inventory Qty','Image Src',
+    ];
+
+    const escape = (v: any) => {
+      const s = String(v ?? '').replace(/"/g, '""');
+      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s}"` : s;
+    };
+
+    const lines: string[] = [header.map(escape).join(',')];
+
+    for (const row of rows) {
+      const p = include_edits && row.has_edits ? JSON.parse(row.edited_json) : JSON.parse(row.data_json);
+      const variants = p.variants ?? [{}];
+      const firstImage = (p.images ?? [])[0]?.src ?? '';
+
+      for (let i = 0; i < variants.length; i++) {
+        const v = variants[i];
+        const isFirst = i === 0;
+        lines.push([
+          isFirst ? p.handle : '',
+          isFirst ? p.title : '',
+          isFirst ? p.body_html ?? '' : '',
+          isFirst ? p.vendor ?? '' : '',
+          isFirst ? p.product_type ?? '' : '',
+          isFirst ? (Array.isArray(p.tags) ? p.tags.join(', ') : (p.tags ?? '')) : '',
+          isFirst ? (p.published_at ? 'TRUE' : 'FALSE') : '',
+          isFirst ? (p.status ?? 'draft') : '',
+          v.sku ?? '',
+          v.price ?? '',
+          v.compare_at_price ?? '',
+          v.barcode ?? '',
+          v.inventory_quantity ?? '',
+          isFirst ? firstImage : (v.image?.src ?? ''),
+        ].map(escape).join(','));
+      }
+    }
+
+    const content = lines.join('\r\n');
+    const { writeFileSync } = await import('fs');
+    writeFileSync(file_path, '﻿' + content, 'utf8'); // BOM for Excel
+    return { data: { rows: lines.length - 1 }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
+ipcMain.handle('shopify-save-dialog', async (event, opts: any) => {
+  const result = await dialog.showSaveDialog({
+    title: opts?.title ?? 'Save File',
+    defaultPath: opts?.defaultPath ?? 'export.csv',
+    filters: opts?.filters ?? [{ name: 'CSV', extensions: ['csv'] }],
+  });
+  return { data: result.filePath ?? null, canceled: result.canceled };
+});
+
 // ─── File / SQLite import ────────────────────────────────────────────────────
 
 ipcMain.handle('pick-sqlite-file', async () => {

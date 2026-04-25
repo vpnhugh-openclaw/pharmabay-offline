@@ -480,8 +480,10 @@ ipcMain.handle('shopify-get-listings', async (event, opts: any) => {
         _price: v0?.price ?? null,
         _barcode: v0?.barcode ?? null,
         _sku: v0?.sku ?? null,
+        _inventory_item_id: v0?.inventory_item_id ?? null,
         _cost_price: local?.cost_price ?? null,
-        _stock_on_hand: local?.stock_on_hand ?? null,
+        _stock_on_hand: v0?.inventory_quantity ?? null,   // from Shopify
+        _local_stock: local?.stock_on_hand ?? null,       // from local DB
         _units_sold_12m: local?.units_sold_12m ?? null,
         _gross_profit_percent: local?.gross_profit_percent ?? null,
       };
@@ -575,6 +577,7 @@ ipcMain.handle('shopify-push-listing-edits', async () => {
 
         // Variant-level fields
         const variantFields = ['price', 'compare_at_price', 'sku', 'barcode'];
+        const locationId = (db.prepare("SELECT value FROM settings WHERE key='shopify_location_id'").get() as any)?.value;
         for (const ev of (edited.variants ?? [])) {
           const ov = (original.variants ?? []).find((v: any) => v.id === ev.id);
           if (!ov) continue;
@@ -584,6 +587,14 @@ ipcMain.handle('shopify-push-listing-edits', async () => {
           }
           if (Object.keys(varPatch).length > 0) {
             await client.updateVariant(ev.id, varPatch);
+          }
+          // Inventory quantity — requires separate Inventory API call
+          if (
+            ev.inventory_quantity !== undefined &&
+            parseInt(ev.inventory_quantity) !== parseInt(ov.inventory_quantity ?? 0) &&
+            ev.inventory_item_id && locationId
+          ) {
+            await client.setInventory(Number(locationId), Number(ev.inventory_item_id), parseInt(ev.inventory_quantity) || 0);
           }
         }
 

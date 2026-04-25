@@ -213,6 +213,10 @@ export class ShopifyAdminClient {
     return data.product;
   }
 
+  async deleteProduct(productId: number | string): Promise<void> {
+    await this.request('DELETE', `/products/${productId}.json`);
+  }
+
   async setInventory(locationId: number | string, inventoryItemId: number | string, available: number): Promise<any> {
     const res = await this.request('POST', '/inventory_levels/set.json', {
       location_id: Number(locationId),

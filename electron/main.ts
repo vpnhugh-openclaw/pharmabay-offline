@@ -615,6 +615,98 @@ ipcMain.handle('shopify-push-listing-edits', async () => {
   }
 });
 
+// ─── Duplicate detection ──────────────────────────────────────────────────────
+
+function jaccardWords(a: string, b: string): number {
+  const words = (s: string) => new Set(
+    s.toLowerCase().replace(/[^a-z0-9]/g, ' ').split(/\s+/).filter(Boolean)
+  );
+  const setA = words(a);
+  const setB = words(b);
+  let inter = 0;
+  for (const w of setA) if (setB.has(w)) inter++;
+  const union = setA.size + setB.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+ipcMain.handle('shopify-find-duplicates', async () => {
+  try {
+    const rows = db.prepare('SELECT id, shopify_id, data_json, edited_json, has_edits FROM shopify_listings').all() as any[];
+    const products = rows.map((r: any) => {
+      const data = JSON.parse(r.data_json);
+      const v0 = data.variants?.[0] ?? {};
+      return { ...r, data, barcode: normalizeKey(v0.barcode ?? ''), sku: normalizeKey(v0.sku ?? '') };
+    });
+
+    type Group = { confidence: 'high' | 'medium'; reason: string; items: any[] };
+    const groups: Group[] = [];
+    const matched = new Set<string>();
+
+    // Pass 1 — exact barcode match
+    const byBarcode = new Map<string, any[]>();
+    for (const p of products) {
+      if (!p.barcode) continue;
+      if (!byBarcode.has(p.barcode)) byBarcode.set(p.barcode, []);
+      byBarcode.get(p.barcode)!.push(p);
+    }
+    for (const [bc, items] of byBarcode) {
+      if (items.length < 2) continue;
+      items.forEach((i: any) => matched.add(i.id));
+      groups.push({ confidence: 'high', reason: `Same barcode: ${bc}`, items });
+    }
+
+    // Pass 2 — exact SKU match (not already matched)
+    const bySku = new Map<string, any[]>();
+    for (const p of products) {
+      if (!p.sku || matched.has(p.id)) continue;
+      if (!bySku.has(p.sku)) bySku.set(p.sku, []);
+      bySku.get(p.sku)!.push(p);
+    }
+    for (const [sk, items] of bySku) {
+      if (items.length < 2) continue;
+      items.forEach((i: any) => matched.add(i.id));
+      groups.push({ confidence: 'high', reason: `Same SKU: ${sk}`, items });
+    }
+
+    // Pass 3 — title similarity ≥ 0.75 within same vendor (unmatched only)
+    const unmatched = products.filter((p: any) => !matched.has(p.id));
+    for (let i = 0; i < unmatched.length; i++) {
+      for (let j = i + 1; j < unmatched.length; j++) {
+        const a = unmatched[i], b = unmatched[j];
+        if (matched.has(a.id) || matched.has(b.id)) continue;
+        if (a.data.vendor !== b.data.vendor) continue; // same vendor only for title match
+        const sim = jaccardWords(a.data.title, b.data.title);
+        if (sim >= 0.75) {
+          matched.add(a.id); matched.add(b.id);
+          groups.push({
+            confidence: sim >= 0.90 ? 'high' : 'medium',
+            reason: `Similar title (${Math.round(sim * 100)}% word match)`,
+            items: [a, b],
+          });
+        }
+      }
+    }
+
+    return { data: { groups, total: groups.length }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
+ipcMain.handle('shopify-delete-listing', async (event, opts: any) => {
+  try {
+    const { shopify_product_id, delete_from_shopify } = opts;
+    if (delete_from_shopify) {
+      const client = new ShopifyAdminClient();
+      await client.deleteProduct(Number(shopify_product_id));
+    }
+    db.prepare('DELETE FROM shopify_listings WHERE shopify_id = ?').run(Number(shopify_product_id));
+    return { data: { ok: true }, error: null };
+  } catch (err: any) {
+    return { data: null, error: err.message };
+  }
+});
+
 ipcMain.handle('shopify-export-listings-csv', async (event, opts: any) => {
   try {
     const { file_path, include_edits } = opts;

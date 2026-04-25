@@ -27,6 +27,8 @@ declare global {
       shopifyPushListingEdits: () => Promise<{ data: { synced: number; failed: number; errors: string[]; apiCalls: number } | null; error: string | null }>;
       shopifyExportListingsCsv: (opts: { file_path: string; include_edits: boolean }) => Promise<{ data: { rows: number } | null; error: string | null }>;
       shopifyBulkUpdateListings: (opts: { product_ids: string[]; patch: Record<string, any> }) => Promise<{ data: { ok: boolean; updated: number } | null; error: string | null }>;
+      shopifyFindDuplicates: () => Promise<{ data: { groups: any[]; total: number } | null; error: string | null }>;
+      shopifyDeleteListing: (opts: { shopify_product_id: number; delete_from_shopify: boolean }) => Promise<{ data: { ok: boolean } | null; error: string | null }>;
       shopifySaveDialog: (opts?: { title?: string; defaultPath?: string; filters?: any[] }) => Promise<{ data: string | null; canceled: boolean }>;
     };
   }

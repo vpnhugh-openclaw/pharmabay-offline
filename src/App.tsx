@@ -22,6 +22,7 @@ import ChannelListingImports from "./pages/ChannelListingImports";
 import EbayCallback from "./pages/EbayCallback";
 import MarketResearch from "./pages/MarketResearch";
 import { ShopifyListings } from "./pages/ShopifyListings";
+import { ShopifyDuplicates } from "./pages/ShopifyDuplicates";
 import Auth from "./pages/Auth";
 import Exports from "./pages/Exports";
 import ScrapeProducts from "./pages/ScrapeProducts";
@@ -59,6 +60,7 @@ const App = () => (
               <Route path="/market-research" element={<MarketResearch />} />
               <Route path="/scrape" element={<ScrapeProducts />} />
               <Route path="/shopify-listings" element={<ShopifyListings />} />
+              <Route path="/shopify-duplicates" element={<ShopifyDuplicates />} />
             </Route>
           </Route>
           <Route path="*" element={<NotFound />} />

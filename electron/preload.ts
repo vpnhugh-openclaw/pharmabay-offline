@@ -25,5 +25,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   shopifyPushListingEdits: () => ipcRenderer.invoke('shopify-push-listing-edits'),
   shopifyExportListingsCsv: (opts: any) => ipcRenderer.invoke('shopify-export-listings-csv', opts),
   shopifyBulkUpdateListings: (opts: any) => ipcRenderer.invoke('shopify-bulk-update-listings', opts),
+  shopifyFindDuplicates: () => ipcRenderer.invoke('shopify-find-duplicates'),
+  shopifyDeleteListing: (opts: any) => ipcRenderer.invoke('shopify-delete-listing', opts),
   shopifySaveDialog: (opts: any) => ipcRenderer.invoke('shopify-save-dialog', opts),
 });

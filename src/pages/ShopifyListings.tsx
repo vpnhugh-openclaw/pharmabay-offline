@@ -6,9 +6,10 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { ProductEditPanel } from "@/components/shopify/listings/ProductEditPanel";
+import { MergeDialog } from "@/components/shopify/listings/MergeDialog";
 import {
   RefreshCw, Upload, Download, Search, ChevronUp, ChevronDown,
-  Edit2, CheckSquare, Square, Loader2, ArchiveX, EyeOff, X,
+  Edit2, CheckSquare, Square, Loader2, ArchiveX, EyeOff, X, Merge,
 } from "lucide-react";
 
 type SortKey = "title" | "vendor" | "status" | "has_edits" | "_price" | "_stock_on_hand" | "_units_sold_12m";
@@ -51,6 +52,7 @@ export function ShopifyListings() {
   const [pushing, setPushing]       = useState(false);
   const [exporting, setExporting]   = useState(false);
   const [bulkWorking, setBulkWorking] = useState(false);
+  const [mergeProducts, setMergeProducts] = useState<[any, any] | null>(null);
   const [statusMsg, setStatusMsg]   = useState<{ text: string; ok: boolean } | null>(null);
 
   const showStatus = (text: string, ok = true) => {
@@ -516,6 +518,20 @@ export function ShopifyListings() {
         {selected.size > 0 && (
           <div className="shrink-0 border-t bg-background px-4 py-2 flex items-center gap-2 shadow-[0_-2px_8px_rgba(0,0,0,0.08)]">
             <span className="text-xs font-medium text-muted-foreground">{selected.size} selected</span>
+            {selected.size === 2 && (() => {
+              const pair = sortedRows.filter((r) => selected.has(r.id));
+              return pair.length === 2 ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 h-7 text-primary border-primary hover:bg-primary/10"
+                  disabled={bulkWorking}
+                  onClick={() => setMergeProducts([pair[0], pair[1]])}
+                >
+                  <Merge className="h-3.5 w-3.5" /> Merge
+                </Button>
+              ) : null;
+            })()}
             <Button size="sm" variant="outline" className="gap-1.5 h-7 text-amber-600 border-amber-400 hover:bg-amber-50 dark:hover:bg-amber-950" disabled={bulkWorking} onClick={() => handleBulk({ status: "draft" }, "Deactivated")}>
               <EyeOff className="h-3.5 w-3.5" /> Deactivate
             </Button>
@@ -543,6 +559,20 @@ export function ShopifyListings() {
             onSaved={handleProductSaved}
           />
         </div>
+      )}
+
+      {/* ── Merge dialog (2 selected) ─────────────────────────────────────── */}
+      {mergeProducts && (
+        <MergeDialog
+          products={mergeProducts}
+          reason="Manually selected for merge"
+          onClose={() => setMergeProducts(null)}
+          onMerged={async () => {
+            setMergeProducts(null);
+            setSelected(new Set());
+            await fetchListings();
+          }}
+        />
       )}
     </div>
   );

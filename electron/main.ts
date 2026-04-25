@@ -774,8 +774,6 @@ function createWindow() {
     const appDir = path.join(process.resourcesPath, 'app');
     console.log('Loading from:', path.join(appDir, 'index.html'));
     mainWindow.loadFile(path.join(appDir, 'index.html'));
-    // Open devtools for debugging
-    mainWindow.webContents.openDevTools();
   }
 }
 

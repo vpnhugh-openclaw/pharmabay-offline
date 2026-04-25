@@ -37,7 +37,9 @@ import { toast } from "sonner";
 
 const navItems = [
   { title: "Scan / Search", url: "/", icon: Scan },
-  { title: "Products", url: "/products", icon: Package },
+  { title: "Shopify Listings", url: "/shopify-listings", icon: LayoutList },
+  { title: "Duplicates Checker", url: "/shopify-duplicates", icon: ScanSearch },
+  { title: "All Products", url: "/products", icon: Package },
   { title: "Review Queue", url: "/review", icon: AlertTriangle },
   { title: "Export History", url: "/exports", icon: Download },
   { title: "Import Stock", url: "/import", icon: Upload },
@@ -45,8 +47,6 @@ const navItems = [
   { title: "Reconciliation", url: "/reconciliation", icon: ArrowLeftRight },
   { title: "Recon Report", url: "/recon-report", icon: FileText },
   { title: "Stock Sync", url: "/stock-sync", icon: ArrowUpDown },
-  { title: "Shopify Listings", url: "/shopify-listings", icon: LayoutList },
-  { title: "Duplicates Checker", url: "/shopify-duplicates", icon: ScanSearch },
   { title: "Channel Imports", url: "/channel-imports", icon: FileDown },
   { title: "Market Research", url: "/market-research", icon: Sparkles },
   { title: "Scrape Products", url: "/scrape", icon: Globe },
